@@ -1,99 +1,73 @@
-'use strict';
-
-//pacakage
 var gulp = require("gulp");
-var connect = require("gulp-connect");
-var rename = require("gulp-rename");
 var browserify = require("browserify");
-var react = require("gulp-react");
+var watchify = require("watchify");
 var uglify = require("gulp-uglify");
 var less = require("gulp-less");
-var reactify = require("gulp-reactify");
-
-
 var minify = require("gulp-minify-css");
 var autoPrefix = require("gulp-autoPrefixer");
-var buffer = require("vinyl-buffer");
+var babel = require ("gulp-babel");
 var source = require("vinyl-source-stream");
-var browserSync = require('browser-sync');
-var reload = browserSync.reload;
-var changed = require('gulp-changed');
-var watchify = require('watchify');
-var es = require("event-stream");
-var fs = require("fs");
-var factor = require("factor-bundle");
-var glob = require("glob");
-var mkdirp = require("mkdirp");
+var buffer = require("vinyl-buffer");
+var changed = require("gulp-changed");
+var browserSync = require("browser-sync").create();
+
+
 var path = require("path");
+var rename = require("gulp-rename");
+var assign = require("lodash.assign");
+var glob = require("glob");
+var factor = require("factor-bundle");
+var mkdir = require("mkdirp");
+
+
 
 var src = {
-	index:"./src/index.html",
-	js:"./src/scripts",
-	css:"./src/styles",
-	html:"./src/views",
-	lib:"./src/libs"
+	index:"src/index.html",
+	js:"src/scripts",
+	css:"src/styles",
+	html:"src/views",
+	lib:"src/libs"
 }
 
 var dist = {
-	index:"./dist",
-	js:"./dist/js",
-	css:"./dist/css",
-	html:"./dist/view",
-	lib:"./dist/lib"
+	index:"dist",
+	js:"dist/js",
+	css:"dist/css",
+	html:"dist/view",
+	lib:"dist/lib"
 }
 
 
-// browserify
 
-// 输入路径表达式
-var inputsExpr = path.join(__dirname,src.js,"/**/*");
+gulp.task("jsx",function(){
 
-
-// 输入输出路径
-var input_dir =  path.join(__dirname,src.js);
-var output_dir = path.join(dist.js);
-
-// 输入输出文件map
-var inputs = glob.sync(inputsExpr,{nodir:true});
-var outputs = inputs.map(function(file){
-	return file.replace("src/scripts",output_dir)
-});
-
-mkdirp.sync(output_dir);
+	var input_files = glob.sync(path.join(src.js,"./**/*.js"));
+	var input_dirs = glob.sync(path.join(src.js,"./**/*/"));
 
 
-gulp.task("jsxBrowserify",function(){
-		browserify({
-			entries:inputs,
-			transform:["reactify"],
-			extensions: ['js', 'jsx']
-		})
-		.plugin(factor,{output:outputs})
-		.bundle()
-		.pipe(source("common.js"))
-		.pipe(buffer())
-		.pipe(uglify())
-		.pipe(gulp.dest(output_dir))
+	var output_files = input_files.map(function(file){
+		var rs = file.replace(src.js.replace(/\\/g,"/"),"")
+		return path.join(dist.js,"."+rs);
+	});
+	//创建dist文件夹
+	input_dirs.map(function(dir){
+		var outputDir = mkdir.sync(dir.replace(src.js,dist.js));
 	});
 
-
-//jsx
-gulp.task("jsx",function(){
-	return gulp.src(path.join(__dirname,src.js,"/**/*.js"))
-		.pipe(changed(path.join(__dirname,dist.js)))
-		.pipe(browserify(
-			{
-				transform:["reactify"]
-			}
-		)
-		.on("prebundle",function(bundler){
-			bundler.require("antd");
-			// bundler.require("react");
-			// bundler.require("react-dom");
+	var browerArg = {
+		entries:input_files,
+		transform:[["babelify",{presets:["es2015","react"]}]]
+	}
+	return watchify(browserify(assign(browerArg,watchify.args)))
+		.plugin(factor,{o:output_files})
+		.bundle()
+		.on("error",function(){
+			console.log(arguments)
 		})
-		)
+		.pipe(source("common.js"))
+		// .pipe(buffer())
 		// .pipe(uglify())
-		.pipe(gulp.dest(path.join(__dirname,dist.js)))
+		.pipe(gulp.dest(path.join(__dirname,dist.js)));
 });
 
 
@@ -123,50 +97,62 @@ gulp.task("index",function(){
 		.pipe(gulp.dest(path.join(__dirname,dist.index)))
 });
 
+//server
+gulp.task("connect",function(){
+	browserSync.init({
+		server:{
+			baseDir:path.join(__dirname,"/dist/")
+		}
+	});
+});
+
+
 //antd
 gulp.task("antd",function(){
-	return gulp.src("./node_modules/antd/style/index.less")
+	return gulp.src(path.join(__dirname,src.lib,"./antd/antd.less"))
 		.pipe(less())
 		.pipe(autoPrefix())
 		.pipe(minify())
-		.pipe(rename(function(p){
-			p.basename = "antd";
-		}))
 		.pipe(gulp.dest(path.join(__dirname,dist.lib,"./antd/")))
 });
 
-//lib
-gulp.task("lib",["antd"]);
-
-
-
-gulp.task("build",["jsxBrowserify","less","tpl","lib"],function(){
-	console.log("build finish");
+//jquery
+gulp.task("jquery",function(){
+	return gulp.src(path.join(__dirname,src.lib,"/**/*.js"))
+		.pipe(gulp.dest(path.join(__dirname,dist.lib)))
 });
 
+gulp.task("watch",function(){
+	var watchArr = [];
+	watchArr.push(gulp.watch(path.join(__dirname,src.js,"/**/*.js"),["jsxReload"]));
+	watchArr.push(gulp.watch(path.join(__dirname,src.css,"/**/*.less"),["less"]));
+	watchArr.push(gulp.watch(path.join(__dirname,src.html,"/**/*.html"),["tpl"]));
+	watchArr.push(gulp.watch(path.join(__dirname,src.index),["index"]));
+	
+	watchArr.push(gulp.watch(path.join(__dirname,dist.js,"/**/*.js")));
+	watchArr.push(gulp.watch(path.join(__dirname,dist.css,"/**/*.css"),browserSync.reload));
+	watchArr.push(gulp.watch(path.join(__dirname,"./dist/**/*.html"),browserSync.reload));
 
-gulp.task("aliasCombo",function(){
-	return gulp.src(path.join(__dirname,dist.lib,"./antd/"))
-	aliasCombo(
-	{
-		paths:{
-			"antd":path.join(__dirname,dist.lib,"./antd/")
-		}
-	})
+	watchArr.forEach(function(watch,i){
+		watch.on("change",function(e){
+			console.log("["+e.type+"]",e.path.replace(__dirname,""));
+		});
+	});
+	
 });
 
+gulp.task("jsxReload",["jsx"],function(){
+	console.log("reload browser");
+	browserSync.reload();
+})
 
-// 用于dev的gulp，开发时使用,watch同样会调用build
-gulp.task("watch",["build"],function(){
-	    browserSync({
-        notify: false,
-        logPrefix: 'BS',
-        server: ['dist']
-    });
 
-gulp.watch(path.join(__dirname,src.js,"/**/*.js"),["jsxBrowserify",reload]);
-gulp.watch(path.join(__dirname,src.css,"/**/*.less"),["less",reload]);
-gulp.watch(path.join(__dirname,src.html,"/**/*.html"),["tpl",reload]);
-gulp.watch(path.join(__dirname,src.index),["index",reload]);
+//可执行任务
 
+gulp.task("lib",["antd","jquery"]);
+
+gulp.task("default",["jsx","less","tpl","lib"],function(){
+	console.log("default finish");
 });
+
+gulp.task("build",["watch","default","connect"]);
